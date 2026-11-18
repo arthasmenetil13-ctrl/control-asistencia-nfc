@@ -21,8 +21,17 @@ App web (un solo HTML, sin instalar nada) para registrar la **hora de entrada y 
 3. Si la misma tarjeta se acerca dos veces en menos de 10 s, se ignora (evita dobles marcaciones).
 4. Los registros se guardan en el navegador (localStorage) y se pueden exportar a **CSV** (abre en Excel) desde la pestaña *Registros*.
 
+## Modo kiosco (celular fijo)
+- La pantalla normal solo muestra "Acerque su tarjeta" y el aviso grande de ENTRADA/SALIDA. No se ven datos de otras personas.
+- El botón **🔒 Admin** pide un PIN. La primera vez se crea (4 a 8 números) y queda guardado solo en ese celular.
+- En modo admin aparecen: registros, exportar CSV, borrar, grabar tarjetas, cambiar PIN y los botones de simulación.
+- El modo admin se cierra solo tras 2 minutos sin uso. Tras 5 PIN incorrectos se bloquea 1 minuto.
+- El lector NFC se activa solo al abrir la página (después de dar el permiso la primera vez).
+- La pantalla se mantiene encendida mientras la página está abierta.
+- Recomendado: usar "Fijar app" de Android (Ajustes → Seguridad → Fijar app) para que no salgan de Chrome.
+
 ## Probar en el PC
-Abre `index.html` con doble clic y usa los botones de simulación (cada uno equivale a acercar la tarjeta de ese usuario).
+Abre la página, entra con **🔒 Admin** y usa los botones de simulación (cada uno equivale a acercar la tarjeta de ese usuario).
 
 ## Usar con NFC real
 - Necesitas un **celular Android con NFC** y **Chrome** (Web NFC solo funciona ahí).
