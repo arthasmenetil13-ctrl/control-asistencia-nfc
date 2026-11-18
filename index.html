@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Control de Asistencia NFC</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6eb;
+    --brand: #1f5eff; --ok: #0f9d58; --out: #d9480f; --warn: #b7791f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--text); color: #fff; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  header h1 { font-size: 1.15rem; margin: 0; }
+  #reloj { font-variant-numeric: tabular-nums; font-size: 1.1rem; }
+  nav { display: flex; gap: 4px; padding: 8px 16px 0; flex-wrap: wrap; }
+  nav button { border: 0; background: transparent; padding: 10px 14px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: .95rem; color: var(--muted); }
+  nav button.activo { background: var(--card); color: var(--text); font-weight: 600; }
+  main { max-width: 1000px; margin: 0 auto; padding: 0 16px 32px; }
+  .panel { background: var(--card); border-radius: 0 10px 10px 10px; padding: 18px; display: none; }
+  .panel.activo { display: block; }
+  .lector { text-align: center; padding: 26px 12px; border: 2px dashed var(--line); border-radius: 12px; margin-bottom: 16px; }
+  .lector .icono { font-size: 3rem; }
+  .estado { color: var(--muted); margin: 8px 0 14px; }
+  .btn { border: 0; background: var(--brand); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: .95rem; cursor: pointer; }
+  .btn.sec { background: #e8ecf5; color: var(--text); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .aviso { padding: 14px; border-radius: 10px; margin-bottom: 16px; font-size: 1.05rem; display: none; }
+  .aviso.entrada { background: #e6f6ee; color: var(--ok); display: block; }
+  .aviso.salida  { background: #fdeee6; color: var(--out); display: block; }
+  .aviso.error   { background: #fff6e0; color: var(--warn); display: block; }
+  .simular { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  h2 { font-size: 1rem; margin: 18px 0 10px; }
+  .tabla-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; }
+  .tag { padding: 2px 8px; border-radius: 99px; font-size: .8rem; font-weight: 600; }
+  .tag.ENTRADA { background: #e6f6ee; color: var(--ok); }
+  .tag.SALIDA { background: #fdeee6; color: var(--out); }
+  .filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .filtros input, .filtros select { padding: 8px; border: 1px solid var(--line); border-radius: 8px; font-size: .9rem; }
+  .tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .tarjeta { border: 1px solid var(--line); border-radius: 14px; padding: 16px; background: linear-gradient(135deg, #1d2330, #34405a); color: #fff; aspect-ratio: 1.586; display: flex; flex-direction: column; justify-content: space-between; }
+  .tarjeta small { opacity: .75; }
+  .tarjeta .cod { font-family: ui-monospace, Consolas, monospace; font-size: 1.05rem; letter-spacing: 1px; }
+  .acciones-tarjeta { margin-top: 8px; display: flex; gap: 6px; }
+  .vacio { color: var(--muted); text-align: center; padding: 16px; }
+  @media print {
+    header, nav, .acciones-tarjeta, .no-print { display: none !important; }
+    .panel { display: none !important; } #p-tarjetas { display: block !important; }
+    .tarjeta { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>📶 Control de Asistencia NFC</h1>
+  <div id="reloj">--:--:--</div>
+</header>
+
+<nav>
+  <button data-tab="p-registro" class="activo">Marcar</button>
+  <button data-tab="p-historial">Registros</button>
+  <button data-tab="p-tarjetas">Usuarios y tarjetas</button>
+</nav>
+
+<main>
+  <!-- MARCAR -->
+  <section id="p-registro" class="panel activo">
+    <div id="aviso" class="aviso"></div>
+    <div class="lector">
+      <div class="icono">📲</div>
+      <div class="estado" id="estadoNFC">Lector NFC inactivo</div>
+      <button class="btn" id="btnLeer">Activar lector NFC</button>
+      <p class="estado" style="margin-top:18px">¿Sin lector NFC? Simula el acercamiento de una tarjeta:</p>
+      <div class="simular" id="simular"></div>
+    </div>
+    <h2>Marcaciones de hoy</h2>
+    <div class="tabla-wrap"><table id="tablaHoy"></table></div>
+  </section>
+
+  <!-- HISTORIAL -->
+  <section id="p-historial" class="panel">
+    <div class="filtros">
+      <input type="date" id="fDesde"> <input type="date" id="fHasta">
+      <select id="fUsuario"><option value="">Todos los usuarios</option></select>
+      <button class="btn sec" id="btnCSV">Exportar CSV</button>
+      <button class="btn sec" id="btnBorrar">Borrar todo</button>
+    </div>
+    <h2>Resumen por día (entrada / salida / horas)</h2>
+    <div class="tabla-wrap"><table id="tablaResumen"></table></div>
+    <h2>Detalle de marcaciones</h2>
+    <div class="tabla-wrap"><table id="tablaHist"></table></div>
+  </section>
+
+  <!-- TARJETAS -->
+  <section id="p-tarjetas" class="panel">
+    <p class="estado no-print">Cada usuario tiene un código NFC. Con un celular Android + Chrome puedes <b>grabarlo</b> en una tarjeta o llavero NFC (NTAG213/215/216) con el botón “Grabar en tarjeta”.</p>
+    <p class="no-print"><button class="btn sec" onclick="window.print()">Imprimir tarjetas</button></p>
+    <div class="tarjetas" id="tarjetas"></div>
+  </section>
+</main>
+
+<script src="usuarios.js"></script>
+<script>
+const CLAVE = "asistencia_nfc_registros";
+const ANTIREBOTE_MS = 10000; // ignora la misma tarjeta durante 10 s
+const usuarios = window.USUARIOS || [];
+const porCodigo = Object.fromEntries(usuarios.map(u => [u.codigoNFC, u]));
+let ultimoToque = {};
+
+// ---------- Almacenamiento ----------
+function cargar() { try { return JSON.parse(localStorage.getItem(CLAVE)) || []; } catch { return []; } }
+function guardar(r) { localStorage.setItem(CLAVE, JSON.stringify(r)); }
+const fechaISO = d => { const z = new Date(d); z.setMinutes(z.getMinutes() - z.getTimezoneOffset()); return z.toISOString().slice(0, 10); };
+const hora = d => new Date(d).toLocaleTimeString("es-CO", { hour12: false });
+const nombre = u => `${u.nombres} ${u.apellidos}`;
+const durTxt = ms => { const m = Math.round(ms / 60000); return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`; };
+
+// ---------- Lógica de marcación ----------
+function marcar(codigo) {
+  codigo = (codigo || "").trim();
+  const u = porCodigo[codigo];
+  if (!u) return aviso("error", `⚠️ Tarjeta no registrada: <b>${codigo || "(vacía)"}</b>`);
+
+  const ahora = Date.now();
+  if (ultimoToque[codigo] && ahora - ultimoToque[codigo] < ANTIREBOTE_MS)
+    return aviso("error", `⏳ ${nombre(u)} ya marcó hace unos segundos.`);
+  ultimoToque[codigo] = ahora;
+
+  const regs = cargar();
+  const hoy = fechaISO(ahora);
+  const delDia = regs.filter(r => r.codigoNFC === codigo && fechaISO(r.fechaHora) === hoy);
+  const ultimo = delDia[delDia.length - 1];
+  const tipo = ultimo && ultimo.tipo === "ENTRADA" ? "SALIDA" : "ENTRADA";
+
+  regs.push({ id: crypto.randomUUID ? crypto.randomUUID() : String(ahora), codigoNFC: codigo,
+              documento: u.documento, nombre: nombre(u), tipo, fechaHora: new Date(ahora).toISOString() });
+  guardar(regs);
+
+  if (tipo === "ENTRADA") aviso("entrada", `✅ <b>ENTRADA</b> · ${nombre(u)} · ${hora(ahora)}`);
+  else aviso("salida", `👋 <b>SALIDA</b> · ${nombre(u)} · ${hora(ahora)} · Tiempo: ${durTxt(ahora - new Date(ultimo.fechaHora))}`);
+  if (navigator.vibrate) navigator.vibrate(150);
+  pintar();
+}
+
+let tAviso;
+function aviso(clase, html) {
+  const el = document.getElementById("aviso");
+  el.className = "aviso " + clase; el.innerHTML = html;
+  clearTimeout(tAviso); tAviso = setTimeout(() => el.className = "aviso", 6000);
+}
+
+// ---------- Web NFC (Chrome Android, requiere HTTPS o localhost) ----------
+const estado = document.getElementById("estadoNFC");
+function leerTexto(record) {
+  if (record.recordType !== "text") return null;
+  return new TextDecoder(record.encoding || "utf-8").decode(record.data);
+}
+document.getElementById("btnLeer").onclick = async () => {
+  if (!("NDEFReader" in window)) {
+    estado.textContent = "Este navegador no soporta Web NFC. Usa Chrome en Android (sitio en HTTPS) o los botones de simulación.";
+    return;
+  }
+  try {
+    const lector = new NDEFReader();
+    await lector.scan();
+    estado.textContent = "🟢 Lector activo: acerca una tarjeta al celular";
+    document.getElementById("btnLeer").disabled = true;
+    lector.onreadingerror = () => aviso("error", "⚠️ No se pudo leer la tarjeta. Intenta de nuevo.");
+    lector.onreading = ({ message, serialNumber }) => {
+      let codigo = null;
+      for (const r of message.records) { codigo = leerTexto(r); if (codigo) break; }
+      // Si la tarjeta no tiene texto grabado, se intenta con su número de serie (UID)
+      marcar(codigo || serialNumber);
+    };
+  } catch (e) {
+    estado.textContent = "No se pudo activar el NFC: " + e.message;
+  }
+};
+
+async function grabarTarjeta(codigo, btn) {
+  if (!("NDEFReader" in window)) return alert("Para grabar tarjetas usa Chrome en Android con NFC activado (sitio en HTTPS).");
+  const txt = btn.textContent; btn.textContent = "Acerca la tarjeta…"; btn.disabled = true;
+  try {
+    await new NDEFReader().write({ records: [{ recordType: "text", data: codigo, lang: "es" }] });
+    alert(`Tarjeta grabada con el código ${codigo}`);
+  } catch (e) { alert("Error al grabar: " + e.message); }
+  btn.textContent = txt; btn.disabled = false;
+}
+
+// ---------- Interfaz ----------
+function tabla(id, cabeceras, filas) {
+  const t = document.getElementById(id);
+  if (!filas.length) { t.innerHTML = `<tr><td class="vacio">Sin registros</td></tr>`; return; }
+  t.innerHTML = `<thead><tr>${cabeceras.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>` +
+    filas.map(f => `<tr>${f.map(c => `<td>${c}</td>`).join("")}</tr>`).join("") + "</tbody>";
+}
+const tag = t => `<span class="tag ${t}">${t}</span>`;
+
+function filtrados() {
+  const d = fDesde.value, h = fHasta.value, u = fUsuario.value;
+  return cargar().filter(r => {
+    const f = fechaISO(r.fechaHora);
+    return (!d || f >= d) && (!h || f <= h) && (!u || r.codigoNFC === u);
+  });
+}
+
+function resumen(regs) {
+  const grupos = {};
+  for (const r of regs) {
+    const k = r.codigoNFC + "|" + fechaISO(r.fechaHora);
+    (grupos[k] ||= { fecha: fechaISO(r.fechaHora), r, lista: [] }).lista.push(r);
+  }
+  return Object.values(grupos).map(g => {
+    const ent = g.lista.find(x => x.tipo === "ENTRADA");
+    const sal = [...g.lista].reverse().find(x => x.tipo === "SALIDA");
+    let total = 0, abierta = null;
+    for (const x of g.lista) {
+      if (x.tipo === "ENTRADA") abierta = new Date(x.fechaHora);
+      else if (abierta) { total += new Date(x.fechaHora) - abierta; abierta = null; }
+    }
+    return [g.fecha, g.r.documento, g.r.nombre, ent ? hora(ent.fechaHora) : "—",
+            sal ? hora(sal.fechaHora) : "—", total ? durTxt(total) : (abierta ? "En turno" : "—")];
+  }).sort((a, b) => b[0].localeCompare(a[0]));
+}
+
+function pintar() {
+  const hoy = fechaISO(Date.now());
+  const regsHoy = cargar().filter(r => fechaISO(r.fechaHora) === hoy).reverse();
+  tabla("tablaHoy", ["Hora", "Tipo", "Documento", "Nombre"],
+    regsHoy.map(r => [hora(r.fechaHora), tag(r.tipo), r.documento, r.nombre]));
+  const f = filtrados();
+  tabla("tablaResumen", ["Fecha", "Documento", "Nombre", "Entrada", "Salida", "Horas"], resumen(f));
+  tabla("tablaHist", ["Fecha", "Hora", "Tipo", "Código NFC", "Documento", "Nombre"],
+    [...f].reverse().map(r => [fechaISO(r.fechaHora), hora(r.fechaHora), tag(r.tipo), r.codigoNFC, r.documento, r.nombre]));
+}
+
+function exportarCSV() {
+  const f = filtrados();
+  if (!f.length) return alert("No hay registros para exportar.");
+  const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+  const filas = [["fecha", "hora", "tipo", "codigo_nfc", "documento", "nombre"],
+    ...f.map(r => [fechaISO(r.fechaHora), hora(r.fechaHora), r.tipo, r.codigoNFC, r.documento, r.nombre])];
+  const blob = new Blob(["﻿" + filas.map(l => l.map(esc).join(";")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = `registros_asistencia_${fechaISO(Date.now())}.csv`; a.click();
+}
+
+// Inicialización
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button, .panel").forEach(x => x.classList.remove("activo"));
+  b.classList.add("activo"); document.getElementById(b.dataset.tab).classList.add("activo");
+});
+const fDesde = document.getElementById("fDesde"), fHasta = document.getElementById("fHasta"), fUsuario = document.getElementById("fUsuario");
+[fDesde, fHasta, fUsuario].forEach(el => el.onchange = pintar);
+document.getElementById("btnCSV").onclick = exportarCSV;
+document.getElementById("btnBorrar").onclick = () => { if (confirm("¿Borrar TODOS los registros? No se puede deshacer.")) { guardar([]); pintar(); } };
+
+usuarios.forEach(u => {
+  fUsuario.insertAdjacentHTML("beforeend", `<option value="${u.codigoNFC}">${nombre(u)}</option>`);
+  const b = document.createElement("button");
+  b.className = "btn sec"; b.textContent = `🪪 ${u.nombres.split(" ")[0]} (${u.codigoNFC})`;
+  b.onclick = () => marcar(u.codigoNFC);
+  document.getElementById("simular").appendChild(b);
+  const c = document.createElement("div");
+  c.innerHTML = `<div class="tarjeta">
+      <div><small>CONTROL DE ASISTENCIA</small><div style="font-size:1.1rem;font-weight:600;margin-top:4px">${nombre(u)}</div><small>${u.cargo}</small></div>
+      <div><small>${u.tipoDocumento} ${u.documento}</small><div class="cod">${u.codigoNFC}</div></div>
+    </div><div class="acciones-tarjeta"><button class="btn">Grabar en tarjeta</button></div>`;
+  c.querySelector(".acciones-tarjeta button").onclick = e => grabarTarjeta(u.codigoNFC, e.target);
+  document.getElementById("tarjetas").appendChild(c);
+});
+
+setInterval(() => document.getElementById("reloj").textContent =
+  new Date().toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "medium", hour12: false }), 1000);
+pintar();
+</script>
+</body>
+</html>
