@@ -1,44 +1,27 @@
 # Control de Asistencia NFC
 
-App web (un solo HTML, sin instalar nada) para registrar la **hora de entrada y salida** acercando una tarjeta o llavero NFC.
+Registro de **hora de entrada y salida** acercando una tarjeta NFC a un celular fijo. Los datos se guardan en **Google Sheets**.
 
-## Archivos
-| Archivo | Para qué |
-|---|---|
-| `index.html` | La aplicación: marcar, ver registros, exportar CSV, ver/grabar tarjetas |
-| `usuarios.js` | Usuarios ficticios y su código NFC (aquí se agregan más) |
+👉 **Para instalarlo, siga la [guía de instalación](INSTALAR.md).**
 
-## Usuarios ficticios
-| Código NFC | Documento | Nombre | Cargo |
-|---|---|---|---|
-| NFC-EMP-0001 | CC 1023456789 | Laura Valentina Méndez Ríos | Auxiliar administrativa |
-| NFC-EMP-0002 | CC 1098765432 | Andrés Felipe Torres Gil | Técnico de soporte |
-| NFC-EMP-0003 | CC 1045678123 | Camila Sofía Herrera Paz | Coordinadora de talento humano |
+## Cómo está armado
+| Parte | Dónde | Qué hace |
+|---|---|---|
+| App del celular | `index.html` (publicada en GitHub Pages) | Lee las tarjetas NFC, muestra ENTRADA/SALIDA y tiene el modo administrador |
+| Servidor | `apps-script/Codigo.gs` (pegado en la hoja de Google) | Decide si es entrada o salida, guarda los registros y la lista de personas |
+| Base de datos | Hoja de Google: *Usuarios*, *Resumen diario*, *Registros* | Todo queda ahí, con historial y respaldo de Google |
 
-## Cómo funciona
-1. Se acerca la tarjeta → la app lee el código grabado en ella.
-2. Si la persona no tiene una entrada abierta hoy, se registra **ENTRADA**; si la tiene, se registra **SALIDA** y se calcula el tiempo trabajado.
-3. Si la misma tarjeta se acerca dos veces en menos de 10 s, se ignora (evita dobles marcaciones).
-4. Los registros se guardan en el navegador (localStorage) y se pueden exportar a **CSV** (abre en Excel) desde la pestaña *Registros*.
+## Seguridad
+- Solo pueden registrar los celulares conectados con el **código QR** de la hoja (llevan una clave secreta). Desde la hoja se pueden desconectar todos.
+- La **hora** la pone el servidor de Google, no el celular (salvo marcaciones hechas sin internet, que quedan señaladas).
+- El modo administrador pide un **PIN** que se verifica en el servidor. Se bloquea 5 minutos tras 5 intentos fallidos y se cierra solo a los 2 minutos sin uso.
+- Las tarjetas guardan solo un código (texto), no un enlace: acercarlas a otro celular no registra nada.
+- Una misma tarjeta no puede quedar asignada a dos personas.
 
-## Modo kiosco (celular fijo)
-- La pantalla normal solo muestra "Acerque su tarjeta" y el aviso grande de ENTRADA/SALIDA. No se ven datos de otras personas.
-- El botón **🔒 Admin** pide un PIN. La primera vez se crea (4 a 8 números) y queda guardado solo en ese celular.
-- En modo admin aparecen: registros, exportar CSV, borrar, grabar tarjetas, cambiar PIN y los botones de simulación.
-- El modo admin se cierra solo tras 2 minutos sin uso. Tras 5 PIN incorrectos se bloquea 1 minuto.
-- El lector NFC se activa solo al abrir la página (después de dar el permiso la primera vez).
-- La pantalla se mantiene encendida mientras la página está abierta.
-- Recomendado: usar "Fijar app" de Android (Ajustes → Seguridad → Fijar app) para que no salgan de Chrome.
+## Qué se guarda en el celular
+Solo lo necesario para funcionar: la conexión con la hoja, una copia de la lista de personas (para funcionar sin internet) y las marcaciones pendientes por enviar. Los registros oficiales están en Google Sheets.
 
-## Probar en el PC
-Abre la página, entra con **🔒 Admin** y usa los botones de simulación (cada uno equivale a acercar la tarjeta de ese usuario).
-
-## Usar con NFC real
-- Necesitas un **celular Android con NFC** y **Chrome** (Web NFC solo funciona ahí).
-- La página debe servirse por **HTTPS** (por ejemplo GitHub Pages, Netlify) o desde `localhost`.
-- Tarjetas recomendadas: NTAG213 / NTAG215 / NTAG216 (baratas, regrabables).
-- Para grabar: pestaña *Usuarios y tarjetas* → **Grabar en tarjeta** → acercar la tarjeta.
-- Si una tarjeta no tiene texto grabado, la app usa su número de serie (UID); puedes poner ese UID como `codigoNFC` en `usuarios.js`.
-
-## Limitaciones actuales
-- Los registros viven en el navegador del dispositivo que marca. Para varios puntos de marcación o un registro central haría falta un pequeño servidor/base de datos (siguiente paso posible).
+## Tarjetas
+- Stickers, tarjetas o llaveros **NTAG213 / NTAG215 / NTAG216**: se graban desde *Administrar → Personas → Grabar tarjeta nueva*.
+- Carnés u otras tarjetas NFC existentes: *Usar tarjeta que ya tiene* (se usa su número de serie).
+- Una tarjeta impresa (papel o impresora 3D) **no tiene NFC** por sí sola: hay que ponerle un sticker NFC dentro o encima.
