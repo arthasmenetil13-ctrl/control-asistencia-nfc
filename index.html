@@ -115,7 +115,8 @@
       <ol class="pasos">
         <li>En el computador, abra la hoja de Google de asistencia.</li>
         <li>Vaya al menú <b>Asistencia NFC → 2. Conectar un celular</b>.</li>
-        <li>Con la <b>cámara</b> de este celular escanee el código QR que aparece y toque el enlace.</li>
+        <li><b>En un celular:</b> escanee el código QR con la cámara y toque el enlace.<br>
+            <b>En un computador:</b> toque “Abrir en este computador” en esa misma ventana de la hoja.</li>
       </ol>
       <details>
         <summary>¿No puede escanear el QR?</summary>
@@ -172,12 +173,7 @@
 
     <!-- PERSONAS -->
     <div id="sPersonas" class="seccion">
-      <div class="ayuda">
-        <b>¿Cómo darle una tarjeta a alguien?</b><br>
-        • <b>Tarjeta o sticker NFC nuevo:</b> toque “Grabar tarjeta nueva”.<br>
-        • <b>Carné u otra tarjeta que ya tiene:</b> toque “Usar tarjeta que ya tiene”.<br>
-        Luego acerque la tarjeta al celular.
-      </div>
+      <div class="ayuda" id="ayudaTarjeta"></div>
       <button class="btn ancho" id="btnNueva" style="margin-bottom:12px">➕ Agregar persona</button>
       <div class="lista" id="listaPersonas"></div>
     </div>
@@ -367,9 +363,66 @@ function toast(txt) {
   clearTimeout(t._t); t._t = setTimeout(() => t.style.display = "none", 3500);
 }
 
-// ======================= LECTOR NFC =======================
+// ======================= LECTURA DE TARJETAS =======================
+// Dos formas de leer:
+//   1) Celular Android con NFC (Web NFC).
+//   2) Computador con lector USB tipo "teclado": escribe el número de la tarjeta muy rápido y presiona Enter.
 // modo: "marcar" (normal) | "asignar" (leer una tarjeta para una persona) | "grabar" (escribiendo una tarjeta)
-let lector = null, modo = "marcar", alLeerAsignar = null;
+const ES_CELULAR_NFC = "NDEFReader" in window;
+let lector = null, modo = "marcar", alLeerAsignar = null, ultimoLeido = "";
+
+// Deja los números de serie siempre igual: "04:a2:3b" → "04A23B"
+function normalizar(codigo) {
+  let c = String(codigo || "").trim().replace(/\s+/g, "");
+  if (/^[0-9a-f]{2}([:-][0-9a-f]{2})+$/i.test(c)) c = c.replace(/[:-]/g, "");
+  return /^[0-9a-f]+$/i.test(c) ? c.toUpperCase() : c;
+}
+
+function tarjetaLeida(codigoBruto) {
+  const codigo = normalizar(codigoBruto);
+  if (!codigo) return;
+  ultimoLeido = codigo; pintarEstado();
+  if (modo === "asignar" && alLeerAsignar) return alLeerAsignar(codigo);
+  if (modo !== "marcar") return;
+  if (adminPin) return toast("Toque “✔ Terminar” para volver al modo de marcar.");
+  marcar(codigo);
+}
+
+// ---- Lector USB tipo teclado ----
+// Distingue el lector de una persona escribiendo: el lector teclea todo en milisegundos.
+const LECTOR_MAX_MS_ENTRE_TECLAS = 60, LECTOR_MIN_CARACTERES = 4;
+let bufLector = "", tUltimaTecla = 0, lectorUsbVisto = false;
+document.addEventListener("keydown", e => {
+  const enCampo = e.target.closest && e.target.closest("input, textarea, select");
+  if (enCampo) return; // si alguien escribe en un formulario, no se toca
+  const t = performance.now();
+  if (t - tUltimaTecla > LECTOR_MAX_MS_ENTRE_TECLAS) bufLector = "";
+  tUltimaTecla = t;
+  if (e.key === "Enter") {
+    if (bufLector.length >= LECTOR_MIN_CARACTERES) {
+      e.preventDefault(); // evita que el Enter del lector "presione" un botón
+      const leido = bufLector; bufLector = "";
+      if (!lectorUsbVisto) { lectorUsbVisto = true; ponerChipLector(); }
+      tarjetaLeida(leido);
+    }
+    bufLector = "";
+    return;
+  }
+  if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    bufLector += e.key;
+    if (e.key === " ") e.preventDefault();
+  }
+}, true);
+
+function ponerChipLector() {
+  const c = $("chipNFC");
+  if (ES_CELULAR_NFC && lector) { c.textContent = "📶 NFC activo"; c.className = "chip on"; return; }
+  if (ES_CELULAR_NFC) return;
+  c.textContent = lectorUsbVisto ? "🟢 Lector USB funcionando" : "⌨️ Lector USB";
+  c.className = "chip" + (lectorUsbVisto ? " on" : "");
+}
+
+// ---- NFC del celular ----
 function codigoDeTarjeta(message, serialNumber) {
   for (const r of message.records) {
     if (r.recordType === "text") {
@@ -389,13 +442,7 @@ async function iniciarNFC() {
     $("chipNFC").textContent = "📶 NFC activo"; $("chipNFC").className = "chip on";
     $("subKiosco").textContent = "a la parte de atrás del celular";
     l.onreadingerror = () => { if (modo === "marcar") resultado("error", "⚠️", "NO SE PUDO LEER", "", "Acerque la tarjeta de nuevo y manténgala quieta un segundo."); };
-    l.onreading = ({ message, serialNumber }) => {
-      const codigo = codigoDeTarjeta(message, serialNumber);
-      if (modo === "asignar" && alLeerAsignar) return alLeerAsignar(codigo);
-      if (modo !== "marcar") return;
-      if (adminPin) return toast("Toque “✔ Terminar” para volver al modo de marcar.");
-      marcar(codigo);
-    };
+    l.onreading = ({ message, serialNumber }) => tarjetaLeida(codigoDeTarjeta(message, serialNumber));
     return true;
   } catch (e) {
     $("subKiosco").textContent = "No se pudo activar el NFC: " + e.message;
@@ -404,9 +451,10 @@ async function iniciarNFC() {
   }
 }
 async function prepararNFC() {
-  if (!("NDEFReader" in window)) {
-    $("subKiosco").textContent = "Este navegador no puede leer NFC. Use Chrome en un celular Android con NFC activado.";
-    $("chipNFC").textContent = "Sin NFC"; $("chipNFC").className = "chip mal";
+  if (!ES_CELULAR_NFC) {
+    // Computador: se usa el lector USB tipo teclado
+    $("subKiosco").textContent = "en el lector";
+    ponerChipLector();
     return;
   }
   try {
@@ -448,7 +496,7 @@ async function conectarDesde(texto) {
   try {
     await api("ping");
     await refrescarUsuarios();
-    resultado("entrada", "✅", "CELULAR CONECTADO", "", "Ya puede usarse para marcar la asistencia.");
+    resultado("entrada", "✅", "CONECTADO", "", "Ya puede usarse para marcar la asistencia.");
   } catch (e) {
     resultado("error", "⚠️", "NO SE PUDO CONECTAR", "", esc(e.message) + "<br>Revise el internet y vuelva a intentarlo.", 8000);
   }
@@ -542,9 +590,10 @@ function pintarPersonas() {
       <b>${esc(nombreDe(p))}</b>
       <div class="muted peq">${esc(p.tipoDoc)} ${esc(p.documento)}${p.cargo ? " · " + esc(p.cargo) : ""}</div>
       <div class="peq" style="margin-top:4px">Tarjeta: <span class="cod">${esc(p.codigo || "sin tarjeta")}</span></div>
-      <div class="acc">
+      <div class="acc">${ES_CELULAR_NFC ? `
         <button class="btn" data-grabar="${esc(p.documento)}">📝 Grabar tarjeta nueva</button>
-        <button class="btn sec" data-asignar="${esc(p.documento)}">🪪 Usar tarjeta que ya tiene</button>
+        <button class="btn sec" data-asignar="${esc(p.documento)}">🪪 Usar tarjeta que ya tiene</button>` : `
+        <button class="btn" data-asignar="${esc(p.documento)}">🪪 ${p.codigo ? "Cambiar tarjeta" : "Asignar tarjeta"}</button>`}
       </div>
     </div>`).join("") || `<p class="muted">Aún no hay personas.</p>`;
   $("listaPersonas").querySelectorAll("[data-grabar]").forEach(b => b.onclick = () => grabarTarjeta(personasHoy.find(p => p.documento === b.dataset.grabar)));
@@ -581,11 +630,14 @@ async function grabarTarjeta(p) {
 }
 
 async function asignarTarjeta(p) {
-  if (!p || sinNFC()) return;
-  if (!(await iniciarNFC())) return;
+  if (!p) return;
+  if (ES_CELULAR_NFC && !(await iniciarNFC())) return;
   modo = "asignar";
+  document.activeElement && document.activeElement.blur();
   const terminar = () => { alLeerAsignar = null; setTimeout(() => { if (modo === "asignar") modo = "marcar"; }, 3000); };
-  abrirNfc("Acerque la tarjeta", `La tarjeta quedará asignada a <b>${esc(nombreDe(p))}</b>.`, terminar);
+  abrirNfc(ES_CELULAR_NFC ? "Acerque la tarjeta al celular" : "Pase la tarjeta por el lector",
+    `La tarjeta quedará asignada a <b>${esc(nombreDe(p))}</b>.` +
+    (p.codigo ? `<br><span class="peq">La tarjeta anterior dejará de funcionar.</span>` : ""), terminar);
   alLeerAsignar = async codigo => {
     alLeerAsignar = null;
     $("nfcTexto").textContent = "Guardando…";
@@ -641,7 +693,9 @@ function pintarEstado() {
   c.style.display = cola.length ? "inline-block" : "none";
   c.textContent = `💾 ${cola.length} por enviar`;
   $("txtEstado").innerHTML = `Conexión: <b>${esc($("chipRed").textContent)}</b><br>` +
-    `Marcaciones guardadas sin enviar: <b>${cola.length}</b><br>Personas en la copia local: <b>${usuarios.length}</b>`;
+    `Marcaciones guardadas sin enviar: <b>${cola.length}</b><br>Personas en la copia local: <b>${usuarios.length}</b><br>` +
+    `Lector: <b>${ES_CELULAR_NFC ? "NFC del celular" : "USB del computador"}</b><br>` +
+    `Última tarjeta leída: <span class="cod">${esc(ultimoLeido || "ninguna todavía")}</span>`;
 }
 
 // ======================= ARRANQUE =======================
@@ -659,6 +713,14 @@ function arrancar() {
 setInterval(enviarCola, 30000);
 setInterval(refrescarUsuarios, 5 * 60000);
 window.addEventListener("online", enviarCola);
+$("ayudaTarjeta").innerHTML = ES_CELULAR_NFC
+  ? `<b>¿Cómo darle una tarjeta a alguien?</b><br>
+     • <b>Tarjeta o sticker NFC nuevo:</b> toque “Grabar tarjeta nueva”.<br>
+     • <b>Carné u otra tarjeta que ya tiene:</b> toque “Usar tarjeta que ya tiene”.<br>
+     Luego acerque la tarjeta al celular.`
+  : `<b>¿Cómo darle una tarjeta a alguien?</b><br>
+     Toque “Asignar tarjeta” en la persona y pase la tarjeta por el lector USB.
+     Sirve cualquier tarjeta NFC: nueva, carné o llavero. No hay que grabarle nada.`;
 pintarEstado();
 prepararNFC();
 mantenerPantalla();

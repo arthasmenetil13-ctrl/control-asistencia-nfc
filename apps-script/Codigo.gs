@@ -94,7 +94,10 @@ function mostrarQR() {
   const enlace = APP_URL + "#config=" + cfg;
   const html = HtmlService.createHtmlOutput(
     '<div style="font-family:sans-serif;text-align:center">' +
-    '<p style="margin:0 0 10px">Abra la <b>cámara</b> del celular que quedará fijo, apunte a este código y toque el enlace que aparece.</p>' +
+    '<p style="margin:0 0 8px"><b>¿El punto de marcación es ESTE computador (lector USB)?</b></p>' +
+    '<a href="' + enlace + '" target="_blank" style="display:inline-block;background:#1f5eff;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:bold">Abrir en este computador</a>' +
+    '<hr style="margin:14px 0">' +
+    '<p style="margin:0 0 10px"><b>¿Es un celular?</b> Abra la <b>cámara</b> del celular, apunte a este código y toque el enlace.</p>' +
     '<div id="qr" style="display:inline-block;padding:10px;background:#fff"></div>' +
     '<p style="font-size:12px;color:#666">No comparta este código: permite registrar asistencia en esta hoja.</p>' +
     '<details style="text-align:left;font-size:12px"><summary>¿No puede escanear?</summary>' +
@@ -103,7 +106,7 @@ function mostrarQR() {
     '<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>' +
     '<script>new QRCode(document.getElementById("qr"),{text:' + JSON.stringify(enlace) +
     ',width:280,height:280,correctLevel:QRCode.CorrectLevel.L});</script>'
-  ).setWidth(400).setHeight(520);
+  ).setWidth(400).setHeight(640);
   ui.showModalDialog(html, "Conectar un celular");
 }
 
@@ -169,7 +172,7 @@ function doPost(e) {
 }
 
 function marcar_(req) {
-  const codigo = String(req.codigo || "").trim();
+  const codigo = normalizar_(req.codigo);
   if (!codigo) return { ok: true, desconocido: true, codigo: "" };
   const u = leerUsuarios_().find(x => x.activo && x.codigo === codigo);
   if (!u) return { ok: true, desconocido: true, codigo };
@@ -259,7 +262,7 @@ function agregarPersona_(req) {
 
 function asignarTarjeta_(req) {
   const documento = String(req.documento || "").trim();
-  const codigo = String(req.codigo || "").trim();
+  const codigo = normalizar_(req.codigo);
   if (!codigo) throw new Error("No se pudo leer la tarjeta.");
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -283,7 +286,7 @@ function leerUsuarios_() {
   const n = h.getLastRow() - 1;
   if (n < 1) return [];
   return h.getRange(2, 1, n, 7).getDisplayValues().map((f, i) => ({
-    fila: i + 2, codigo: f[0].trim(), tipoDoc: f[1].trim(), documento: f[2].trim(),
+    fila: i + 2, codigo: normalizar_(f[0]), tipoDoc: f[1].trim(), documento: f[2].trim(),
     nombres: f[3].trim(), apellidos: f[4].trim(), cargo: f[5].trim(),
     activo: f[6].trim().toUpperCase() !== "NO"
   })).filter(u => u.documento || u.codigo);
@@ -346,6 +349,13 @@ function sh_(nombre) {
 function hash_(texto) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, "asistencia|" + texto, Utilities.Charset.UTF_8)
     .map(b => ((b + 256) % 256).toString(16).padStart(2, "0")).join("");
+}
+
+// Escribe el número de la tarjeta siempre igual, venga del celular ("04:a2:3b") o del lector USB ("04A23B")
+function normalizar_(codigo) {
+  let c = String(codigo || "").trim().replace(/\s+/g, "");
+  if (/^[0-9a-f]{2}([:-][0-9a-f]{2})+$/i.test(c)) c = c.replace(/[:-]/g, "");
+  return /^[0-9a-f]+$/i.test(c) ? c.toUpperCase() : c;
 }
 
 function nuevoToken_() { return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, ""); }

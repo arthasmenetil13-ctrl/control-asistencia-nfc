@@ -1,13 +1,13 @@
 # Control de Asistencia NFC
 
-Registro de **hora de entrada y salida** acercando una tarjeta NFC a un celular fijo. Los datos se guardan en **Google Sheets**.
+Registro de **hora de entrada y salida** con tarjetas NFC, usando un **computador con lector NFC USB** o un **celular Android**. Los datos se guardan en **Google Sheets**.
 
 👉 **Para instalarlo, siga la [guía de instalación](INSTALAR.md).**
 
 ## Cómo está armado
 | Parte | Dónde | Qué hace |
 |---|---|---|
-| App del celular | `index.html` (publicada en GitHub Pages) | Lee las tarjetas NFC, muestra ENTRADA/SALIDA y tiene el modo administrador |
+| App (computador o celular) | `index.html` (publicada en GitHub Pages) | Lee las tarjetas NFC, muestra ENTRADA/SALIDA y tiene el modo administrador |
 | Servidor | `apps-script/Codigo.gs` (pegado en la hoja de Google) | Decide si es entrada o salida, guarda los registros y la lista de personas |
 | Base de datos | Hoja de Google: *Usuarios*, *Resumen diario*, *Registros* | Todo queda ahí, con historial y respaldo de Google |
 
