@@ -304,21 +304,23 @@ async function refrescarUsuarios() {
 
 // ======================= MARCACIÓN =======================
 const ultimoToque = {};
-async function marcar(codigo) {
-  codigo = String(codigo || "").trim();
-  if (!codigo) return;
+// codigo = texto grabado en la tarjeta (o su número de serie si no tiene texto); uid = número de serie
+async function marcar(codigo, uid = "") {
+  codigo = normalizar(codigo); uid = normalizar(uid);
+  if (!codigo && !uid) return;
+  const clave = uid || codigo;
   const ahora = Date.now();
-  if (ultimoToque[codigo] && ahora - ultimoToque[codigo] < ANTIREBOTE_MS) {
-    const u = usuarios.find(x => x.codigo === codigo);
+  if (ultimoToque[clave] && ahora - ultimoToque[clave] < ANTIREBOTE_MS) {
+    const u = buscarTarjeta(usuarios, codigo, uid);
     return resultado("error", "⏳", "YA MARCÓ", u ? nombreDe(u) : "", "Espere unos segundos antes de volver a acercar la tarjeta.");
   }
-  ultimoToque[codigo] = ahora;
-  const p = { codigo, idLocal: uuid(), fechaHora: new Date(ahora).toISOString() };
+  ultimoToque[clave] = ahora;
+  const p = { codigo, uid, idLocal: uuid(), fechaHora: new Date(ahora).toISOString() };
 
   resultado("espera", "⏳", "Registrando…", "", "", 0);
   try {
     const r = await api("marcar", p);
-    if (r.desconocido) return resultado("error", "⚠️", "TARJETA NO REGISTRADA", "", `Pida al administrador que la asigne.<br><span class="peq">Código: ${esc(codigo)}</span>`);
+    if (r.desconocido) return resultado("error", "⚠️", "TARJETA NO REGISTRADA", "", `Pida al administrador que la asigne.<br><span class="peq">Código: ${esc(codigo || uid)}</span>`);
     if (r.repetido || r.duplicado) return resultado("error", "⏳", "YA MARCÓ", r.nombre, "Su marcación anterior ya quedó guardada.");
     if (r.tipo === "ENTRADA") resultado("entrada", "✅", "ENTRADA", r.nombre, `Hora: ${esc(r.hora)}<br>¡Buen día!`);
     else resultado("salida", "👋", "SALIDA", r.nombre, `Hora: ${esc(r.hora)} · Tiempo trabajado: ${esc(r.duracion)}<br>¡Hasta pronto!`);
@@ -327,8 +329,8 @@ async function marcar(codigo) {
   } catch (e) {
     if (!(e instanceof ErrorRed)) return resultado("error", "⚠️", "NO SE PUDO REGISTRAR", "", esc(e.message));
     // Sin internet: se guarda y se envía después (con la hora real en que se acercó la tarjeta)
-    const u = usuarios.find(x => x.codigo === codigo);
-    if (!u) return resultado("error", "⚠️", "TARJETA NO REGISTRADA", "", `Sin internet y tarjeta desconocida.<br><span class="peq">Código: ${esc(codigo)}</span>`);
+    const u = buscarTarjeta(usuarios, codigo, uid);
+    if (!u) return resultado("error", "⚠️", "TARJETA NO REGISTRADA", "", `Sin internet y tarjeta desconocida.<br><span class="peq">Código: ${esc(codigo || uid)}</span>`);
     cola.push(p); guardarLS(K_COLA, cola); pintarEstado();
     resultado("guardado", "💾", "MARCACIÓN GUARDADA", nombreDe(u), `Hora: ${new Date(ahora).toLocaleTimeString("es-CO", { hour12: false })}<br>No hay internet. Se enviará sola cuando vuelva la conexión.`);
     if (navigator.vibrate) navigator.vibrate(200);
@@ -378,14 +380,35 @@ function normalizar(codigo) {
   return /^[0-9a-f]+$/i.test(c) ? c.toUpperCase() : c;
 }
 
-function tarjetaLeida(codigoBruto) {
-  const codigo = normalizar(codigoBruto);
-  if (!codigo) return;
-  ultimoLeido = codigo; pintarEstado();
-  if (modo === "asignar" && alLeerAsignar) return alLeerAsignar(codigo);
+// Misma lógica que el servidor: una tarjeta se reconoce por su texto, su número de serie,
+// o su número de serie en otro formato (algunos lectores USB lo dan en decimal o al revés).
+function variantesUid(hex) {
+  if (!/^[0-9A-F]+$/.test(hex) || hex.length % 2 || hex.length < 8) return [];
+  const bytes = hex.match(/../g), out = [];
+  const agregar = arr => { const h = arr.join(""), d = BigInt("0x" + h).toString(); out.push(h, d, d.padStart(10, "0")); };
+  agregar(bytes); agregar([...bytes].reverse());
+  if (bytes.length > 4) { agregar(bytes.slice(0, 4)); agregar(bytes.slice(0, 4).reverse()); }
+  return out;
+}
+function mismaTarjeta(a, b) {
+  if (!a || !b) return false;
+  return a === b || variantesUid(b).includes(a) || variantesUid(a).includes(b);
+}
+function buscarTarjeta(lista, codigo, uid) {
+  return lista.find(x => codigo && normalizar(x.codigo) === codigo) ||
+         lista.find(x => uid && normalizar(x.uid) === uid) ||
+         lista.find(x => [codigo, uid].some(l => l && (mismaTarjeta(l, normalizar(x.uid)) || mismaTarjeta(l, normalizar(x.codigo)))));
+}
+
+function tarjetaLeida(codigoBruto, uidBruto = "") {
+  const codigo = normalizar(codigoBruto), uid = normalizar(uidBruto);
+  if (!codigo && !uid) return;
+  ultimoLeido = uid && uid !== codigo ? `${codigo} · nº de serie ${uid}` : (codigo || uid);
+  pintarEstado();
+  if (modo === "asignar" && alLeerAsignar) return alLeerAsignar(codigo, uid);
   if (modo !== "marcar") return;
   if (adminPin) return toast("Toque “✔ Terminar” para volver al modo de marcar.");
-  marcar(codigo);
+  marcar(codigo, uid);
 }
 
 // ---- Lector USB tipo teclado ----
@@ -403,7 +426,7 @@ document.addEventListener("keydown", e => {
       e.preventDefault(); // evita que el Enter del lector "presione" un botón
       const leido = bufLector; bufLector = "";
       if (!lectorUsbVisto) { lectorUsbVisto = true; ponerChipLector(); }
-      tarjetaLeida(leido);
+      tarjetaLeida(leido, leido); // el lector USB solo da el número de serie
     }
     bufLector = "";
     return;
@@ -423,14 +446,16 @@ function ponerChipLector() {
 }
 
 // ---- NFC del celular ----
+// Devuelve el texto grabado (p. ej. "NFC-EMP-0001") y el número de serie de la tarjeta.
+// Si la tarjeta no tiene texto (p. ej. un carné), el código es su número de serie.
 function codigoDeTarjeta(message, serialNumber) {
-  for (const r of message.records) {
+  for (const r of (message && message.records) || []) {
     if (r.recordType === "text") {
       const t = new TextDecoder(r.encoding || "utf-8").decode(r.data).trim();
-      if (t) return t;
+      if (t) return { codigo: t, uid: serialNumber || "" };
     }
   }
-  return serialNumber || ""; // tarjeta sin código grabado (p. ej. un carné): se usa su número de serie
+  return { codigo: serialNumber || "", uid: serialNumber || "" };
 }
 async function iniciarNFC() {
   if (lector) return true;
@@ -442,7 +467,10 @@ async function iniciarNFC() {
     $("chipNFC").textContent = "📶 NFC activo"; $("chipNFC").className = "chip on";
     $("subKiosco").textContent = "a la parte de atrás del celular";
     l.onreadingerror = () => { if (modo === "marcar") resultado("error", "⚠️", "NO SE PUDO LEER", "", "Acerque la tarjeta de nuevo y manténgala quieta un segundo."); };
-    l.onreading = ({ message, serialNumber }) => tarjetaLeida(codigoDeTarjeta(message, serialNumber));
+    l.onreading = ({ message, serialNumber }) => {
+      const t = codigoDeTarjeta(message, serialNumber);
+      tarjetaLeida(t.codigo, t.uid);
+    };
     return true;
   } catch (e) {
     $("subKiosco").textContent = "No se pudo activar el NFC: " + e.message;
@@ -589,7 +617,7 @@ function pintarPersonas() {
     <div class="persona">
       <b>${esc(nombreDe(p))}</b>
       <div class="muted peq">${esc(p.tipoDoc)} ${esc(p.documento)}${p.cargo ? " · " + esc(p.cargo) : ""}</div>
-      <div class="peq" style="margin-top:4px">Tarjeta: <span class="cod">${esc(p.codigo || "sin tarjeta")}</span></div>
+      <div class="peq" style="margin-top:4px">Tarjeta: <span class="cod">${esc(p.codigo || "sin tarjeta")}</span>${p.uid && p.uid !== p.codigo ? ` · nº de serie <span class="cod">${esc(p.uid)}</span>` : ""}${p.codigo && !p.uid ? ` <span class="muted">(se completa al primer uso)</span>` : ""}</div>
       <div class="acc">${ES_CELULAR_NFC ? `
         <button class="btn" data-grabar="${esc(p.documento)}">📝 Grabar tarjeta nueva</button>
         <button class="btn sec" data-asignar="${esc(p.documento)}">🪪 Usar tarjeta que ya tiene</button>` : `
@@ -638,11 +666,11 @@ async function asignarTarjeta(p) {
   abrirNfc(ES_CELULAR_NFC ? "Acerque la tarjeta al celular" : "Pase la tarjeta por el lector",
     `La tarjeta quedará asignada a <b>${esc(nombreDe(p))}</b>.` +
     (p.codigo ? `<br><span class="peq">La tarjeta anterior dejará de funcionar.</span>` : ""), terminar);
-  alLeerAsignar = async codigo => {
+  alLeerAsignar = async (codigo, uid) => {
     alLeerAsignar = null;
     $("nfcTexto").textContent = "Guardando…";
     try {
-      await api("asignarTarjeta", { pin: adminPin, documento: p.documento, codigo });
+      await api("asignarTarjeta", { pin: adminPin, documento: p.documento, codigo, uid });
       $("dlgNfc").close();
       resultado("entrada", "✅", "TARJETA ASIGNADA", nombreDe(p), "Ya puede usarla para marcar entrada y salida.");
       refrescarUsuarios(); cargarHoy();

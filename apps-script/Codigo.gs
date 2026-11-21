@@ -15,7 +15,7 @@ const ZONA_HORARIA = "America/Bogota";
 const ANTIREBOTE_SEG = 10;
 
 const H_USU = "Usuarios", H_RES = "Resumen diario", H_REG = "Registros";
-const CAB_USU = ["Código NFC", "Tipo doc", "Documento", "Nombres", "Apellidos", "Cargo", "Activo (SI/NO)"];
+const CAB_USU = ["Código NFC", "Tipo doc", "Documento", "Nombres", "Apellidos", "Cargo", "Activo (SI/NO)", "Nº de serie tarjeta (automático)"];
 const CAB_RES = ["Fecha", "Documento", "Nombre", "Cargo", "Entrada", "Salida", "Horas trabajadas"];
 const CAB_REG = ["Fecha", "Hora", "Tipo", "Documento", "Nombre", "Código NFC", "Origen", "ID"];
 
@@ -41,6 +41,9 @@ function configurar() {
   const res = hoja_(H_RES, CAB_RES);
   const reg = hoja_(H_REG, CAB_REG);
   usu.getRange("A:C").setNumberFormat("@");      // códigos y documentos como texto
+  usu.getRange("H:H").setNumberFormat("@");      // número de serie de la tarjeta
+  if (!usu.getRange(1, 8).getDisplayValue())     // hojas creadas con una versión anterior
+    usu.getRange(1, 8).setValue(CAB_USU[7]).setFontWeight("bold").setBackground("#1d2330").setFontColor("#ffffff");
   res.getRange("A:G").setNumberFormat("@");      // fechas/horas como texto (evita cambios de formato)
   reg.getRange("A:H").setNumberFormat("@");
 
@@ -172,15 +175,19 @@ function doPost(e) {
 }
 
 function marcar_(req) {
-  const codigo = normalizar_(req.codigo);
-  if (!codigo) return { ok: true, desconocido: true, codigo: "" };
-  const u = leerUsuarios_().find(x => x.activo && x.codigo === codigo);
-  if (!u) return { ok: true, desconocido: true, codigo };
-  const nombre = u.nombres + " " + u.apellidos;
+  // codigo = texto grabado en la tarjeta (o su número de serie si no tiene texto); uid = número de serie
+  const codigo = normalizar_(req.codigo), uid = normalizar_(req.uid);
+  if (!codigo && !uid) return { ok: true, desconocido: true, codigo: "" };
 
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
+    const u = buscarTarjeta_(leerUsuarios_().filter(x => x.activo), codigo, uid);
+    if (!u) return { ok: true, desconocido: true, codigo: codigo || uid };
+    // La primera vez que se usa una tarjeta con texto grabado, se guarda su número de serie
+    // para que también funcione en un lector USB de computador.
+    if (uid && !u.uid) sh_(H_USU).getRange(u.fila, 8).setValue(uid);
+    const nombre = u.nombres + " " + u.apellidos;
     const reg = sh_(H_REG);
     if (req.idLocal && existeId_(reg, String(req.idLocal))) return { ok: true, duplicado: true, nombre };
 
@@ -189,7 +196,7 @@ function marcar_(req) {
     if (offline && req.fechaHora) { const d = new Date(req.fechaHora); if (!isNaN(d.getTime())) cuando = d; }
 
     const cache = CacheService.getScriptCache();
-    const k = "ult_" + codigo;
+    const k = "ult_" + u.documento;
     const ult = Number(cache.get(k) || 0);
     if (!offline && ult && cuando.getTime() - ult < ANTIREBOTE_SEG * 1000) return { ok: true, repetido: true, nombre };
     cache.put(k, String(cuando.getTime()), 120);
@@ -206,7 +213,7 @@ function marcar_(req) {
       tipo = "ENTRADA";
       res.appendRow([fecha, u.documento, nombre, u.cargo, hora, "", ""]);
     }
-    reg.appendRow([fecha, hora, tipo, u.documento, nombre, codigo,
+    reg.appendRow([fecha, hora, tipo, u.documento, nombre, codigo || uid,
                    offline ? "Sin internet (enviado después)" : "En línea", String(req.idLocal || "")]);
     return { ok: true, tipo, nombre, hora, duracion };
   } finally {
@@ -262,18 +269,22 @@ function agregarPersona_(req) {
 
 function asignarTarjeta_(req) {
   const documento = String(req.documento || "").trim();
-  const codigo = normalizar_(req.codigo);
+  let uid = normalizar_(req.uid);
+  const codigo = normalizar_(req.codigo) || uid;
   if (!codigo) throw new Error("No se pudo leer la tarjeta.");
+  if (!uid && /^[0-9A-F]+$/.test(codigo)) uid = codigo; // lector USB: el código ES el número de serie
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     const usuarios = leerUsuarios_();
     const u = usuarios.find(x => x.documento === documento);
     if (!u) throw new Error("No se encontró la persona.");
-    const otro = usuarios.find(x => x.codigo === codigo && x.documento !== documento);
+    const otro = usuarios.find(x => x.documento !== documento && buscarTarjeta_([x], codigo, uid));
     if (otro) throw new Error("Esa tarjeta ya pertenece a " + otro.nombres + " " + otro.apellidos + ".");
-    sh_(H_USU).getRange(u.fila, 1).setValue(codigo);
-    return { ok: true, codigo, nombre: u.nombres + " " + u.apellidos };
+    const h = sh_(H_USU);
+    h.getRange(u.fila, 1).setValue(codigo);
+    h.getRange(u.fila, 8).setValue(uid);
+    return { ok: true, codigo, uid, nombre: u.nombres + " " + u.apellidos };
   } finally {
     lock.releaseLock();
   }
@@ -285,15 +296,43 @@ function leerUsuarios_() {
   const h = sh_(H_USU);
   const n = h.getLastRow() - 1;
   if (n < 1) return [];
-  return h.getRange(2, 1, n, 7).getDisplayValues().map((f, i) => ({
+  return h.getRange(2, 1, n, 8).getDisplayValues().map((f, i) => ({
     fila: i + 2, codigo: normalizar_(f[0]), tipoDoc: f[1].trim(), documento: f[2].trim(),
     nombres: f[3].trim(), apellidos: f[4].trim(), cargo: f[5].trim(),
-    activo: f[6].trim().toUpperCase() !== "NO"
+    activo: f[6].trim().toUpperCase() !== "NO", uid: normalizar_(f[7])
   })).filter(u => u.documento || u.codigo);
 }
 
 function publico_(u) {
-  return { codigo: u.codigo, tipoDoc: u.tipoDoc, documento: u.documento, nombres: u.nombres, apellidos: u.apellidos, cargo: u.cargo };
+  return { codigo: u.codigo, uid: u.uid, tipoDoc: u.tipoDoc, documento: u.documento, nombres: u.nombres, apellidos: u.apellidos, cargo: u.cargo };
+}
+
+// Busca a quién pertenece una tarjeta: por el texto grabado, por el número de serie,
+// o por el número de serie escrito en otro formato (algunos lectores USB lo dan en decimal o al revés).
+function buscarTarjeta_(lista, codigo, uid) {
+  return lista.find(x => codigo && x.codigo === codigo) ||
+         lista.find(x => uid && x.uid === uid) ||
+         lista.find(x => [codigo, uid].some(l => l && (mismaTarjeta_(l, x.uid) || mismaTarjeta_(l, x.codigo))));
+}
+
+function mismaTarjeta_(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return variantesUid_(b).indexOf(a) >= 0 || variantesUid_(a).indexOf(b) >= 0;
+}
+
+function variantesUid_(hex) {
+  if (!/^[0-9A-F]+$/.test(hex) || hex.length % 2 || hex.length < 8) return [];
+  const bytes = hex.match(/../g), out = [];
+  const agregar = arr => {
+    const h = arr.join("");
+    out.push(h);
+    const d = BigInt("0x" + h).toString();
+    out.push(d, d.padStart(10, "0"));
+  };
+  agregar(bytes); agregar(bytes.slice().reverse());
+  if (bytes.length > 4) { agregar(bytes.slice(0, 4)); agregar(bytes.slice(0, 4).reverse()); }
+  return out;
 }
 
 function turnoAbierto_(res, fecha, documento) {

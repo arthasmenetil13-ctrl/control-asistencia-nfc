@@ -12,23 +12,27 @@ Necesita una cuenta de Google y Chrome (en el computador o en el celular).
 
 ## ¿Qué va dentro de la tarjeta NFC?
 
-**Con el lector USB (opción A): no hay que grabarle nada.**
-Toda tarjeta NFC trae de fábrica un **número de serie único**, por ejemplo `04A23B1C5D8080`.
-El lector lee ese número y el sistema lo busca en la pestaña *Usuarios* de la hoja.
-Para "darle" una tarjeta a una persona solo hay que **asignarla**: *Administrar → Personas → Asignar tarjeta* y pasarla por el lector.
+Cada tarjeta tiene dos cosas, y el sistema reconoce a la persona por cualquiera de las dos:
 
-**Con el celular (opción B): se puede grabar un código de texto** (por ejemplo `NFC-EMP-0001`) o también usar el número de serie, igual que con el lector.
+1. **Un texto grabado** con el código de la persona, por ejemplo `NFC-EMP-0001`. Lo graba la empresa que imprime las tarjetas (o usted desde la app). **El celular lo lee.**
+2. **Un número de serie de fábrica**, único, por ejemplo `04A23B1C5D8080`. No se graba: ya viene. **El lector USB del computador lee este.**
+
+**Para que la misma tarjeta sirva en el celular y en el computador:**
+- La primera vez que alguien marca con el **celular**, el sistema guarda solo el número de serie de su tarjeta (columna *Nº de serie tarjeta* de la hoja). Desde ahí funciona también en el **computador**.
+- Si una tarjeta se va a usar primero en el computador, asígnela una vez: *Administrar → Personas → Asignar tarjeta* y pásela por el lector.
+- Si el proveedor entrega la lista de números de serie, también puede pegarlos en esa columna.
 
 ### Para la prueba con los 3 usuarios de ejemplo
-| Persona de prueba | Documento | Código de ejemplo en la hoja |
+| Persona de prueba | Documento | Texto a grabar en la tarjeta |
 |---|---|---|
 | Laura Valentina Méndez Ríos | CC 1023456789 | `NFC-EMP-0001` |
 | Andrés Felipe Torres Gil | CC 1098765432 | `NFC-EMP-0002` |
 | Camila Sofía Herrera Paz | CC 1045678123 | `NFC-EMP-0003` |
 
-- **Lector USB:** tome cualquier tarjeta NFC, vaya a *Administrar → Personas*, toque **Asignar tarjeta** en "Laura" y pase la tarjeta. El código `NFC-EMP-0001` se reemplaza por el número de la tarjeta. Desde ese momento esa tarjeta es de Laura.
-- **Celular:** en *Administrar → Personas* toque **Grabar tarjeta nueva** en "Laura" y acerque un sticker NFC en blanco. Se le graba el texto `NFC-EMP-0001`.
-  - Si prefiere grabarla con otra app (por ejemplo **NFC Tools**): *Escribir → Agregar un registro → Texto* → escriba `NFC-EMP-0001` → *Escribir* y acerque la tarjeta.
+- **Tarjetas del proveedor:** pídalas con chip NTAG215 y un registro de **Texto** con el código de la tabla. Llegan listas: solo acérquelas al celular.
+- **Grabarlas usted (celular):** en *Administrar → Personas* toque **Grabar tarjeta nueva** en "Laura" y acerque un sticker o tarjeta NFC en blanco.
+  - Con otra app (por ejemplo **NFC Tools**): *Escribir → Agregar un registro → Texto* → escriba `NFC-EMP-0001` → *Escribir* y acerque la tarjeta.
+- **Sin grabar nada:** *Administrar → Personas → Usar tarjeta que ya tiene* (celular) o *Asignar tarjeta* (computador), y acerque cualquier tarjeta NFC.
 
 > Una tarjeta impresa en papel o en impresora 3D **no tiene NFC**. Necesita un sticker, tarjeta o llavero NFC (NTAG213/215/216 o MIFARE) dentro o pegado.
 
