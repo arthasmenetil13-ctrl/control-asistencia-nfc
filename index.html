@@ -127,10 +127,19 @@
       </details>
       <p class="peq muted">¿Todavía no tiene la hoja? Siga la <a href="https://github.com/arthasmenetil13-ctrl/control-asistencia-nfc/blob/main/INSTALAR.md" target="_blank" rel="noopener">guía de instalación</a>.</p>
     </div>
+    <div class="card">
+      <h2>¿Solo quiere probar una tarjeta?</h2>
+      <p class="muted">El <b>modo prueba</b> funciona sin la hoja de Google, con las 3 personas de ejemplo (NFC-EMP-0001, 0002 y 0003). Los registros quedan solo en este celular.</p>
+      <button class="btn sec ancho" id="btnDemo">🧪 Probar ahora (modo prueba)</button>
+    </div>
   </section>
 
   <!-- ============ 2. KIOSCO ============ -->
   <section id="vKiosco" class="vista">
+    <div class="ayuda" id="bannerDemo" style="display:none;text-align:center">
+      🧪 <b>MODO PRUEBA</b>: los registros quedan solo en este celular. PIN de administrador: <b>1234</b>.
+      <br><a href="#" id="lnkSalirDemo">Salir del modo prueba</a>
+    </div>
     <div class="card kiosco">
       <div class="ondas">📲</div>
       <div class="titulo">Acerque su tarjeta</div>
@@ -263,10 +272,93 @@ let usuarios = leerLS(K_USU, []);
 let cola = leerLS(K_COLA, []);
 let adminPin = null;
 
+// ======================= MODO PRUEBA (sin hoja de Google) =======================
+// Imita al servidor con las 3 personas de ejemplo. Todo queda en este celular. Solo para probar tarjetas.
+const K_DEMO = "asistencia_demo", PIN_DEMO = "1234";
+const DEMO_INICIAL = () => ({
+  usuarios: [
+    { codigo: "NFC-EMP-0001", uid: "", tipoDoc: "CC", documento: "1023456789", nombres: "Laura Valentina", apellidos: "Méndez Ríos", cargo: "Auxiliar administrativa" },
+    { codigo: "NFC-EMP-0002", uid: "", tipoDoc: "CC", documento: "1098765432", nombres: "Andrés Felipe", apellidos: "Torres Gil", cargo: "Técnico de soporte" },
+    { codigo: "NFC-EMP-0003", uid: "", tipoDoc: "CC", documento: "1045678123", nombres: "Camila Sofía", apellidos: "Herrera Paz", cargo: "Coordinadora de talento humano" }
+  ],
+  registros: []
+});
+const dosDig = n => String(n).padStart(2, "0");
+const fechaLocal = d => `${d.getFullYear()}-${dosDig(d.getMonth() + 1)}-${dosDig(d.getDate())}`;
+const horaLocal = d => `${dosDig(d.getHours())}:${dosDig(d.getMinutes())}:${dosDig(d.getSeconds())}`;
+
+function apiDemo(accion, d) {
+  const st = leerLS(K_DEMO, null) || DEMO_INICIAL();
+  const guardar = r => { guardarLS(K_DEMO, st); return r; };
+  const hoy = fechaLocal(new Date());
+  const pinOk = () => { if (d.pin !== PIN_DEMO) throw Object.assign(new Error("PIN incorrecto"), { pinMalo: true }); };
+  switch (accion) {
+    case "ping": return { ok: true };
+    case "usuarios": return { ok: true, usuarios: st.usuarios };
+    case "verificarPin": pinOk(); return { ok: true };
+    case "marcar": {
+      const u = buscarTarjeta(st.usuarios, normalizar(d.codigo), normalizar(d.uid));
+      if (!u) return { ok: true, desconocido: true };
+      if (d.uid && !u.uid) u.uid = normalizar(d.uid);
+      const cuando = d.offline && d.fechaHora ? new Date(d.fechaHora) : new Date();
+      const fecha = fechaLocal(cuando), hora = horaLocal(cuando);
+      const delDia = st.registros.filter(r => r.documento === u.documento && r.fecha === fecha);
+      const ult = delDia[delDia.length - 1];
+      const tipo = ult && ult.tipo === "ENTRADA" ? "SALIDA" : "ENTRADA";
+      let duracion = "";
+      if (tipo === "SALIDA") {
+        const seg = h => h.split(":").reduce((a, x) => a * 60 + Number(x), 0);
+        const m = Math.round(Math.max(0, seg(hora) - seg(ult.hora)) / 60);
+        duracion = `${Math.floor(m / 60)}h ${dosDig(m % 60)}m`;
+      }
+      st.registros.push({ fecha, hora, tipo, documento: u.documento });
+      return guardar({ ok: true, tipo, nombre: nombreDe(u), hora, duracion });
+    }
+    case "hoy": {
+      pinOk();
+      const personas = st.usuarios.map(u => {
+        const t = st.registros.filter(r => r.documento === u.documento && r.fecha === hoy);
+        const ent = t.find(r => r.tipo === "ENTRADA"), ult = t[t.length - 1];
+        const sal = ult && ult.tipo === "SALIDA" ? ult.hora : "";
+        return { ...u, entrada: ent ? ent.hora : "", salida: sal, estado: !ult ? "NO_LLEGA" : (ult.tipo === "ENTRADA" ? "EN_TURNO" : "SALIO") };
+      });
+      return { ok: true, fecha: hoy, personas, hojaUrl: "" };
+    }
+    case "agregarPersona": {
+      pinOk();
+      const doc = String(d.documento || "").replace(/[.\s]/g, "");
+      if (st.usuarios.some(u => u.documento === doc)) throw new Error("Ya existe una persona con ese documento.");
+      const max = Math.max(0, ...st.usuarios.map(u => Number((/^NFC-EMP-(\d+)$/.exec(u.codigo) || [])[1] || 0)));
+      const p = { codigo: "NFC-EMP-" + String(max + 1).padStart(4, "0"), uid: "", tipoDoc: d.tipoDoc || "CC", documento: doc,
+                  nombres: String(d.nombres).trim(), apellidos: String(d.apellidos).trim(), cargo: String(d.cargo || "").trim() };
+      st.usuarios.push(p);
+      return guardar({ ok: true, persona: p });
+    }
+    case "asignarTarjeta": {
+      pinOk();
+      let uid = normalizar(d.uid); const codigo = normalizar(d.codigo) || uid;
+      if (!uid && /^[0-9A-F]+$/.test(codigo)) uid = codigo;
+      const u = st.usuarios.find(x => x.documento === d.documento);
+      const otro = st.usuarios.find(x => x.documento !== d.documento && buscarTarjeta([x], codigo, uid));
+      if (otro) throw new Error("Esa tarjeta ya pertenece a " + nombreDe(otro) + ".");
+      u.codigo = codigo; u.uid = uid;
+      return guardar({ ok: true, codigo, uid, nombre: nombreDe(u) });
+    }
+    default: throw new Error("Acción desconocida");
+  }
+}
+
+function iniciarDemo() {
+  cfg = { demo: true }; guardarLS(K_CFG, cfg);
+  arrancar();
+  resultado("entrada", "🧪", "MODO PRUEBA", "", "Toque “Activar lector NFC” (solo la primera vez) y acerque la tarjeta.", 5000);
+}
+
 // ======================= COMUNICACIÓN CON LA HOJA =======================
 class ErrorRed extends Error {}
 async function api(accion, datos = {}) {
   if (!cfg) throw new Error("Celular sin conectar");
+  if (cfg.demo) { ponerRed(true); return apiDemo(accion, datos); }
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIEMPO_ESPERA_MS);
   let r;
@@ -538,13 +630,20 @@ $("btnCfg").onclick = () => {
 function desconectar(preguntar = true) {
   if (preguntar && !confirm("¿Desconectar este celular? Para volver a usarlo tendrá que escanear el QR de la hoja.")) return;
   if (cola.length && preguntar && !confirm(`Hay ${cola.length} marcaciones sin enviar y se perderán. ¿Desconectar de todos modos?`)) return;
+  const eraDemo = cfg && cfg.demo;
   cfg = null; adminPin = null;
-  localStorage.removeItem(K_CFG); localStorage.removeItem(K_USU); localStorage.removeItem(K_COLA);
+  $("bannerDemo").style.display = "none";
+  localStorage.removeItem(K_CFG); localStorage.removeItem(K_USU); localStorage.removeItem(K_COLA); localStorage.removeItem(K_DEMO);
   usuarios = []; cola = [];
-  if (!preguntar) toast("Este celular fue desconectado desde la hoja. Vuelva a conectarlo con el QR.");
+  if (!preguntar) toast(eraDemo ? "Salió del modo prueba." : "Este celular fue desconectado desde la hoja. Vuelva a conectarlo con el QR.");
   mostrar("vConfig");
 }
 $("btnDesconectar").onclick = () => desconectar(true);
+$("btnDemo").onclick = iniciarDemo;
+$("lnkSalirDemo").onclick = e => {
+  e.preventDefault();
+  if (confirm("¿Salir del modo prueba? Se borran los registros de prueba de este celular.")) desconectar(false);
+};
 
 // ======================= MODO ADMINISTRADOR =======================
 $("btnAdmin").onclick = () => { $("pin").value = ""; $("errPin").textContent = ""; $("dlgPin").showModal(); $("pin").focus(); };
@@ -589,7 +688,8 @@ async function cargarHoy() {
   try {
     const r = await api("hoy", { pin: adminPin });
     personasHoy = r.personas;
-    $("lnkHoja").href = r.hojaUrl;
+    $("lnkHoja").style.display = r.hojaUrl ? "" : "none"; // en modo prueba no hay hoja
+    $("lnkHoja").href = r.hojaUrl || "#";
     pintarHoy(); pintarPersonas();
   } catch (e) {
     $("listaHoy").innerHTML = `<p class="err">${esc(e instanceof ErrorRed ? "Sin internet. Conéctese para ver la información." : e.message)}</p>`;
@@ -733,6 +833,7 @@ setInterval(tickReloj, 15000); tickReloj();
 function arrancar() {
   if (!cfg) return mostrar("vConfig");
   mostrar("vKiosco");
+  $("bannerDemo").style.display = cfg.demo ? "block" : "none";
   api("ping").catch(() => {});
   refrescarUsuarios();
   enviarCola();
@@ -753,6 +854,11 @@ pintarEstado();
 prepararNFC();
 mantenerPantalla();
 
+// ¿Se abrió con el enlace del modo prueba (…/#prueba)?
+if (location.hash === "#prueba" || location.hash === "#demo") {
+  history.replaceState(null, "", location.pathname + location.search);
+  if (!cfg || cfg.demo) iniciarDemo(); else arrancar(); // un celular ya conectado a la hoja no se toca
+} else
 // ¿Se abrió desde el QR de la hoja?
 if (location.hash.startsWith("#config=")) {
   const enlace = location.href;
